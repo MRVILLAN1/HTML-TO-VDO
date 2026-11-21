@@ -1,6 +1,15 @@
 """
-Course HTML Bot — v2 (VIDEO FORMAT)
+Course HTML Bot — v3 (VIDEO FORMAT + KOYEB FIX)
 Apne khud ke course ki HTML file se Telegram bot.
+
+v3 me kya fix hai (v2 se):
+- Procfile me ab web: bhi hai, worker: bhi — Web Service ho ya Worker,
+  dono me command milegi, "no command to run" error nahi aayega.
+- Dockerfile bhi hai — Dockerfile builder se bhi chalega.
+- Ek chhota health server bhi chalta hai (PORT par, default 8000) —
+  Web Service ka health check pass ho jata hai, bot polling ke
+  saath-saath chalta hai. Health server fail ho jaye to bhi bot
+  rukta nahi, sirf warning log me aayegi.
 
 Kaam:
 - course.html ko parse karta hai (wahi structure: h1 title, .item,
@@ -36,6 +45,8 @@ Env vars (Koyeb):
 import logging
 import os
 import re
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -49,7 +60,7 @@ from telegram.ext import (
     filters,
 )
 
-VERSION = "v2"
+VERSION = "v3"
 VIDEO_EXTS = (".mp4", ".mkv", ".mov", ".webm", ".m4v")
 BASE_DIR = Path(__file__).resolve().parent
 COURSE_FILE = BASE_DIR / "course.html"
@@ -62,6 +73,35 @@ logging.basicConfig(
 logger = logging.getLogger("course-html-bot")
 
 COURSE = {"title": "Course", "info": "", "lessons": []}
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - stdlib name
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, *args):  # noqa: ANN002, ANN202 - chup raho, log spam mat karo
+        pass
+
+
+def start_health_server() -> None:
+    """Koyeb Web Service health check ke liye chhota HTTP server.
+
+    Bot polling se alag thread me chalta hai, bot ko block nahi karta.
+    Port busy ho ya fail ho jaye to sirf warning deke bot chalu rehta hai.
+    """
+    try:
+        port = int(os.environ.get("PORT", "8000"))
+    except ValueError:
+        port = 8000
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        logger.info("HEALTH SERVER started on port %d", port)
+    except Exception as e:  # noqa: BLE001 - health server optional hai
+        logger.warning("HEALTH SERVER start nahi hua (bot phir bhi chalega): %s", e)
 
 
 def parse_course_html(path: Path) -> dict:
@@ -407,6 +447,7 @@ def main() -> None:
     if not token:
         raise SystemExit("BOT_TOKEN env var set karo (Koyeb env me).")
     load_course()
+    start_health_server()
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("lessons", cmd_lessons))
