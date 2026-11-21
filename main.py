@@ -454,7 +454,7 @@ def main() -> None:
     app.add_handler(CommandHandler("video", cmd_video))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CallbackQueryHandler(on_callback))
-    app.add_handler(MessageHandler(filters.Document.HTML, on_html_document))
+    app.add_handler(MessageHandler(filters.Document.ALL, on_html_document))
     logger.info("COURSE-BOT VERSION: %s | polling start", VERSION)
     app.run_polling()
 
